@@ -19,3 +19,6 @@ sqlnet.log
 sqlnet.ora
 tnsnames.ora
 oraaccess.xml
+
+# Webstorm Ignores
+.idea
