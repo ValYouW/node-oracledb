@@ -77,6 +77,7 @@ typedef struct Bind
   DPI_BUFLEN_TYPE     *len;            // actual length IN/OUT  for bind APIs
   unsigned int        *len2;           // used for DML returning
   DPI_SZ_TYPE         maxSize;
+  DPI_BUFLEN_TYPE     *arrLen;
   unsigned short      type;
   short               *ind;
   bool                isOut;
@@ -86,7 +87,7 @@ typedef struct Bind
   dpi::DateTimeArray* dttmarr;
 
   Bind () : key(""), value(NULL), extvalue (NULL), len(NULL), len2(NULL),
-            maxSize(0), type(0), ind(NULL), isOut(false), isInOut(false),
+            maxSize(0), arrLen(NULL), type(0), ind(NULL), isOut(false), isInOut(false),
             rowsReturned(0), dttmarr ( NULL )
   {}
 }Bind;
@@ -195,6 +196,10 @@ typedef struct eBaton
            if ( binds[index]->len )
            {
              free ( binds[index]->len );
+           }
+           if (binds[index]->arrLen)
+           {
+             free(binds[index]->arrLen);
            }
            if ( binds[index]->len2 )
            {
@@ -335,6 +340,7 @@ private:
                            eBaton* executeBaton);
   static void GetInBindParams (Handle<Value> bindtypes, Bind* bind,
                                      eBaton* executeBaton, BindType bindType);
+  static void SetArrayBindParam(Handle<Value> v8val, Bind* bind, eBaton* executeBaton);
   static void GetOutBindParams (unsigned short dataType, Bind* bind,
                                 eBaton* executeBaton);
   static void Descr2Double ( Define* defines, unsigned int numCols,

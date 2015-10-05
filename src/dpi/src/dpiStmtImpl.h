@@ -75,13 +75,13 @@ public:
   virtual void release ();
 
   virtual void bind (unsigned int pos, unsigned short type, void *buf,
-                     DPI_SZ_TYPE bufSize, short *ind, DPI_BUFLEN_TYPE *bufLen,
+                     DPI_SZ_TYPE bufSize, short *ind, DPI_BUFLEN_TYPE *bufLen, DPI_BUFLEN_TYPE *arrLen,
                      void *data, cbtype cb);
 
   virtual void bind (const unsigned char *name, int nameLen, 
                      unsigned int bndpos,
                      unsigned short type, void *buf, DPI_SZ_TYPE bufSize,
-                     short *ind, DPI_BUFLEN_TYPE *bufLen,
+                     short *ind, DPI_BUFLEN_TYPE *bufLen, DPI_BUFLEN_TYPE *arrLen,
                      void *data, cbtype cb);
 
   virtual void execute ( int numIterations, bool autoCommit );

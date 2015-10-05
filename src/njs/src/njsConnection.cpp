@@ -572,7 +572,13 @@ void Connection::GetBindUnit (Handle<Value> val, Bind* bind,
   NanScope();
   unsigned int dir   = BIND_IN;
 
-  if(val->IsObject() && !val->IsDate() && !Buffer::HasInstance(val))
+  if (val->IsArray())
+  {
+    bind->isOut = false;
+    Connection::GetInBindParams(val, bind, executeBaton, BIND_IN);
+    if (!executeBaton->error.empty()) goto exitGetBindUnit;
+  }
+  else if(val->IsObject() && !val->IsDate() && !Buffer::HasInstance(val))
   {
     dir                     = BIND_UNKNOWN;
     Local<Object> bind_unit = val->ToObject();
@@ -810,6 +816,10 @@ void Connection::GetInBindParams (Handle<Value> v8val, Bind* bind,
     /* Convert v8::Date value to long double */
     Connection::v8Date2OraDate ( v8val, bind);
   }
+  else if (v8val->IsArray())
+  {
+    SetArrayBindParam(v8val, bind, executeBaton);
+  }
   else if(v8val->IsObject ())
   {
     Local<Object> obj = v8val->ToObject();
@@ -846,6 +856,110 @@ void Connection::GetInBindParams (Handle<Value> v8val, Bind* bind,
   executeBaton->binds.push_back(bind);
   exitGetInBindParams:
   ;
+}
+
+void Connection::SetArrayBindParam(Handle<Value> v8val, Bind* bind, eBaton* executeBaton)
+{
+  // len will be re-allocated according to the actual array size
+  if (bind->len) 
+  {
+    free(bind->len);
+  }
+
+  bind->arrLen = (DPI_BUFLEN_TYPE *)malloc(sizeof(DPI_BUFLEN_TYPE));
+
+  // Check if the array is empty
+  // NOTE: Currently not working, is it supported? (get wrong number or types of arguments.. error)
+  v8::Handle<v8::Array> arr = v8::Handle<v8::Array>::Cast(v8val);
+  if (arr->Length() < 1) {
+    bind->type = dpi::DpiDouble;
+    bind->value = new double[0];
+    bind->maxSize = sizeof(double);
+    *(bind->arrLen) = 0;
+    bind->len = new DPI_BUFLEN_TYPE[0];
+  }
+
+  // Next we will create the input array, the array type will be derived from the type of the first element.
+  Local<Value> val = arr->Get(0);
+
+  // Integer array.
+  if (val->IsNumber()) {
+    bind->type = dpi::DpiDouble;
+
+    // Allocate memory for the input array and the element's length array
+    double* numArr = new double[arr->Length()];
+    bind->len = new DPI_BUFLEN_TYPE[arr->Length()];
+
+    for (unsigned int i = 0; i < arr->Length(); i++) {
+      Local<Value> currVal = arr->Get(i);
+      if (!currVal->IsNumber()) {
+        executeBaton->error = NJSMessages::getErrorMsg(errBindValueAndTypeMismatch, 2);
+        return;
+      }
+
+      // JS numbers can exceed oracle numbers, make sure this is not the case.
+      double d = currVal->NumberValue();
+      if (d > 9.99999999999999999999999999999999999999*std::pow(double(10), double(125)) || d < -9.99999999999999999999999999999999999999*std::pow(double(10), double(125))) {
+        executeBaton->error = NJSMessages::getErrorMsg(errInvalidParameterValue, 2);
+        return;
+      }
+
+      // Convert the JS number into Oracle Number and get its bytes representation
+      numArr[i] = d;
+      bind->len[i] = sizeof(double);
+    }
+
+    bind->value = numArr;
+    *(bind->arrLen) = arr->Length();
+    bind->maxSize = sizeof(double);
+  }
+
+  // String array
+  else if (val->IsString()) {
+    // NOTE: Currently not working for NCHAR arrays (get array bind type must match PL/SQL table row type error)
+    //       Should a call to OCIAttrSet() is necessary?
+    bind->type = dpi::DpiString;
+
+    // Find the longest string, this is necessary in order to create a buffer later.
+    int longestString = 0;
+    for (unsigned int i = 0; i < arr->Length(); i++) {
+      Local<Value> currVal = arr->Get(i);
+      if (currVal->ToString()->Utf8Length() > longestString)
+        longestString = currVal->ToString()->Utf8Length();
+    }
+
+    // Add 1 for '\0'
+    ++longestString;
+
+    // Create a long char* that will hold the entire array, it is important to create a FIXED SIZE array,
+    // meaning all strings have the same allocated length.
+    char* strArr = new char[arr->Length() * longestString];
+    bind->len = new DPI_BUFLEN_TYPE[arr->Length()];
+
+    // loop thru the arr and copy the strings into the strArr
+    int bytesWritten = 0;
+    for (unsigned int i = 0; i < arr->Length(); i++) {
+      Local<Value> currVal = arr->Get(i);
+      if (!currVal->IsString()) {
+        executeBaton->error = NJSMessages::getErrorMsg(errBindValueAndTypeMismatch, 2);
+        return;
+      }
+
+      String::Utf8Value utfStr(currVal);
+
+      // Copy this string onto the strArr (we put \0 in the beginning as this is what strcat expects).
+      strArr[bytesWritten] = '\0';
+      strncat(strArr + bytesWritten, *utfStr, longestString);
+      bytesWritten += longestString;
+
+      // Set the length of this element, add +1 for the '\0'
+      bind->len[i] = utfStr.length() + 1;
+    }
+
+    bind->value = strArr;
+    *(bind->arrLen) = arr->Length();
+    bind->maxSize = longestString;
+  }
 }
 
 /*****************************************************************************/
@@ -1134,6 +1248,7 @@ void Connection::PrepareAndBind (eBaton* executeBaton)
                   executeBaton->binds[index]->maxSize,
                 executeBaton->binds[index]->ind,
                 executeBaton->binds[index]->len,
+                executeBaton->binds[index]->arrLen,
                 (executeBaton->stmtIsReturning &&
                   executeBaton->binds[index]->isOut) ?
                 (void *)executeBaton : NULL,
@@ -1191,6 +1306,7 @@ void Connection::PrepareAndBind (eBaton* executeBaton)
                    executeBaton->binds[index]->maxSize,
                 executeBaton->binds[index]->ind,
                 executeBaton->binds[index]->len,
+                executeBaton->binds[index]->arrLen,
                 (executeBaton->stmtIsReturning &&
                   executeBaton->binds[index]->isOut ) ?
                     (void *)executeBaton : NULL,
