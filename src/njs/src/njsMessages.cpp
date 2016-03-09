@@ -1,4 +1,5 @@
-/* Copyright (c) 2015, Oracle and/or its affiliates. All rights reserved. */
+/* Copyright (c) 2015, 2016, Oracle and/or its affiliates.
+   All rights reserved. */
 
 /******************************************************************************
  *
@@ -62,6 +63,21 @@ static const char *errMsg[] =
   "NJS-026: maxRows must be greater than zero",
   "NJS-027: unexpected SQL parsing error",
   "NJS-028: raw database type is not supported with DML Returning statements",
+  "NJS-029: Invalid object from javascript",
+  "NJS-030: connection cannot be released because Lob operations are in"
+            " progress",
+  "NJS-031: connection cannot be released because ResultSet operations are"
+            " in progress",
+  "NJS-032: connection cannot be released because a database call is in"
+            " progress",
+  "NJS-033: an internal error occurred. [%s][%s]",
+  "NJS-034: data type is unsupported for array bind",
+  "NJS-035: maxArraySize is required for IN OUT array bind",
+  "NJS-036: given array is of size greater than maxArraySize",
+  "NJS-037: incompatible type of value provided",
+  "NJS-038: maxArraySize value should be greater than 0",
+  "NJS-039: empty array is not allowed for IN bind",
+  "NJS-040: connection request timeout",
 };
 
 string NJSMessages::getErrorMsg ( NJSErrorType err, ... )

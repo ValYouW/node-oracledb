@@ -1,5 +1,90 @@
 # Change Log
 
+## node-oracledb v1.7.1 (1 Mar 2016)
+
+- Made public methods overwritable in new JavaScript layer
+
+## node-oracledb v1.7.0 (29 Feb 2016)
+
+- Added a JavaScript wrapper around the C++ API to allow for easier
+  extension.
+
+- Added a connection pool queue configured with `queueRequests` and
+  `queueTimeout` attributes.  The queue is enabled by default.
+  
+- Added connection pool option attribute `_enableStats` and method
+  `pool._logStats()` to display pool and queue statistics.  Note: these may
+  change in future.
+  
+- Added "bind by position" syntax for PL/SQL Index-by array binds.
+
+- Allowed node-oracledb class instances to be tested with 'instanceof'.
+
+- Fixed some bind issues when bind values are not set by the database.
+
+- Replaced internal usage of `info.This()` with `info.Holder()` for Node.js 0.10.
+
+- Fixed some compilation warnings with some Windows compilers.
+
+## node-oracledb v1.6.0 (30 Jan 2016)
+
+- Added support for binding PL/SQL Collection Associative Array
+  (Index-by) types containing numbers and strings.
+
+- Fixed a LOB problem causing an uncaught error to be generated.
+
+- Removed the 'close' event that was incorrectly emitted for LOB Writable
+  Streams.  The Node.js Streams documentation specifies it only for
+  Readable Streams.
+
+- Updated the LOB examples to show connection release.
+
+- Updated README so first-time users see pre-requisites earlier.
+
+- Extended the OS X install instructions with a way to install that doesn't
+  need root access for Instant Client 11.2 on El Capitan.
+
+- Added RPATH link option when building on OS X in preparation for future client.
+
+## node-oracledb v1.5.0 (21 Dec 2015)
+
+- Treat Oracle Database 'Success With Info' warnings as success.
+
+- Extend rollback-on-connection-release with 11g Oracle Clients to occur for all non-query executions. (Not needed with 12c clients).
+
+- Updated OS X install instructions to work on El Capitan.
+
+- Display an error and prevent connection release while database calls are in progress.
+
+- Fixed intermittent crash while selecting data from CLOB column.
+
+- Fixed crash when trying to set invalid values for connection properties.
+
+## node-oracledb v1.4.0 (17 Nov 2015)
+
+- Upgraded NAN dependency to version 2 allowing node-oracledb to build 
+  with Node 0.10, 0.12, 4 and 5.  Note: a compiler supporting C++11 is required to build with Node 4.2 and 5.
+
+- Fixed a cursor leak when statement execution fails.
+
+- Fixed a crash when accessing Pool properties on Windows.
+
+- Added a run-script 'testWindows' target for Windows testing. See [test/README.md](test/README.md)
+
+- Fixed compilation warnings with recent compilers.
+
+## node-oracledb v1.3.0 (15 Oct 2015)
+
+- Added a `oracledb.oracleClientVersion` property giving the version of the Oracle
+  client library, and a `connection.oracleServerVersion` property giving the Oracle
+  Database version.
+
+- Fixed `result.outBinds` corruption after PL/SQL execution.
+
+- Fixed null output from DML RETURNING with Oracle Database 11.2 when the string is of size 4000.
+
+- Fixed default bind direction to be `BIND_IN`.
+
 ## node-oracledb v1.2.0 (25 Sep 2015)
 
 - Added support for RAW data type.

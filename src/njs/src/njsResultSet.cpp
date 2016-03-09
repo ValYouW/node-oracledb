@@ -58,7 +58,7 @@ using namespace std;
 using namespace node;
 using namespace v8;
                                         //peristent ResultSet class handle
-Persistent<FunctionTemplate> ResultSet::resultSetTemplate_s;
+Nan::Persistent<FunctionTemplate> ResultSet::resultSetTemplate_s;
 /*****************************************************************************/
 /*
    DESCRIPTION
@@ -143,22 +143,22 @@ void ResultSet::setResultSet ( dpi::Stmt *stmt, eBaton *executeBaton )
 */
 void ResultSet::Init(Handle<Object> target)
 {
-  NanScope();
-  Local<FunctionTemplate> temp = NanNew<FunctionTemplate>(New);
+  Nan::HandleScope scope;
+  Local<FunctionTemplate> temp = Nan::New<FunctionTemplate>(New);
   temp->InstanceTemplate()->SetInternalFieldCount(1);
-  temp->SetClassName(NanNew<v8::String>("ResultSet"));
+  temp->SetClassName(Nan::New<v8::String>("ResultSet").ToLocalChecked());
 
-  NODE_SET_PROTOTYPE_METHOD(temp, "close", Close);
-  NODE_SET_PROTOTYPE_METHOD(temp, "getRow", GetRow);
-  NODE_SET_PROTOTYPE_METHOD(temp, "getRows", GetRows);
+  Nan::SetPrototypeMethod(temp, "close", Close);
+  Nan::SetPrototypeMethod(temp, "getRow", GetRow);
+  Nan::SetPrototypeMethod(temp, "getRows", GetRows);
 
-  temp->InstanceTemplate()->SetAccessor(
-                                        NanNew<v8::String>("metaData"),
-                                        ResultSet::GetMetaData,
-                                        ResultSet::SetMetaData );
+  Nan::SetAccessor(temp->InstanceTemplate(),
+    Nan::New<v8::String>("metaData").ToLocalChecked(),
+    ResultSet::GetMetaData,
+    ResultSet::SetMetaData );
 
-  NanAssignPersistent( resultSetTemplate_s, temp);
-  target->Set(NanNew<v8::String>("ResultSet"),temp->GetFunction());
+  resultSetTemplate_s.Reset( temp);
+  Nan::Set(target, Nan::New<v8::String>("ResultSet").ToLocalChecked(), temp->GetFunction());
 }
 
 /*****************************************************************************/
@@ -168,12 +168,11 @@ void ResultSet::Init(Handle<Object> target)
 */
 NAN_METHOD(ResultSet::New)
 {
-  NanScope();
 
   ResultSet *resultSet = new ResultSet();
-  resultSet->Wrap(args.This());
+  resultSet->Wrap(info.Holder());
 
-  NanReturnValue(args.This());
+  info.GetReturnValue().Set(info.Holder());
 }
 
 /*****************************************************************************/
@@ -181,31 +180,33 @@ NAN_METHOD(ResultSet::New)
    DESCRIPTION
      Get Accessor of metaData Property
 */
-NAN_PROPERTY_GETTER(ResultSet::GetMetaData)
+NAN_GETTER(ResultSet::GetMetaData)
 {
-  NanScope();
-  ResultSet* njsResultSet  = ObjectWrap::Unwrap<ResultSet>(args.Holder());
+  ResultSet* njsResultSet  = Nan::ObjectWrap::Unwrap<ResultSet>(info.Holder());
   string msg;
 
+  NJS_CHECK_OBJECT_VALID2(njsResultSet, info);
   if(!njsResultSet->njsconn_->isValid())
   {
     msg = NJSMessages::getErrorMsg ( errInvalidConnection );
     NJS_SET_EXCEPTION(msg.c_str(), (int) msg.length());
-    NanReturnUndefined();
+    info.GetReturnValue().SetUndefined();
+    return;
   }
   else if(njsResultSet->state_ == INVALID)
   {
     msg = NJSMessages::getErrorMsg ( errInvalidResultSet );
     NJS_SET_EXCEPTION(msg.c_str(), (int) msg.length());
-    NanReturnUndefined();
+    info.GetReturnValue().SetUndefined();
+    return;
   }
   std::string *columnNames = new std::string[njsResultSet->numCols_];
   Connection::CopyMetaData ( columnNames, njsResultSet->meta_,
                              njsResultSet->numCols_ );
-  Handle<Value> meta;
+  Local<Value> meta;
   meta = Connection::GetMetaData( columnNames,
                                   njsResultSet->numCols_ );
-  NanReturnValue(meta);
+  info.GetReturnValue().Set(meta);
 }
 
 /*****************************************************************************/
@@ -215,10 +216,10 @@ NAN_PROPERTY_GETTER(ResultSet::GetMetaData)
 */
 NAN_SETTER(ResultSet::SetMetaData)
 {
-  NanScope();
-  ResultSet* njsResultSet = ObjectWrap::Unwrap<ResultSet>(args.Holder());
+  ResultSet* njsResultSet = Nan::ObjectWrap::Unwrap<ResultSet>(info.Holder());
   string msg;
 
+  NJS_CHECK_OBJECT_VALID(njsResultSet);
   if(!njsResultSet->njsconn_->isValid())
     msg = NJSMessages::getErrorMsg ( errInvalidConnection );
   else if(njsResultSet->state_ == INVALID)
@@ -234,19 +235,22 @@ NAN_SETTER(ResultSet::SetMetaData)
      Get Row method on Result Set class.
 
    PARAMETERS:
-     args - callback
+     info - callback
 */
 NAN_METHOD(ResultSet::GetRow)
 {
-  NanScope();
 
   Local<Function> callback;
-  NJS_GET_CALLBACK ( callback, args );
+  NJS_GET_CALLBACK ( callback, info );
 
-  ResultSet *njsResultSet = ObjectWrap::Unwrap<ResultSet>(args.This());
-  rsBaton   *getRowsBaton = new rsBaton ();
-  getRowsBaton->njsRS     = njsResultSet;
-  NanAssignPersistent(getRowsBaton->cb, callback );
+  ResultSet *njsResultSet = Nan::ObjectWrap::Unwrap<ResultSet>(info.Holder());
+
+  /* If njsResultSet is invalid from JS, then throw an exception */
+  NJS_CHECK_OBJECT_VALID2 ( njsResultSet, info );
+
+  rsBaton   *getRowsBaton = new rsBaton ( njsResultSet->njsconn_->RSCount (),
+                                          callback );
+  getRowsBaton->njsRS = njsResultSet;
 
   if(njsResultSet->state_ == INVALID)
   {
@@ -264,13 +268,13 @@ NAN_METHOD(ResultSet::GetRow)
   }
   njsResultSet->state_  = ACTIVE;
 
-  NJS_CHECK_NUMBER_OF_ARGS ( getRowsBaton->error, args, 1, 1, exitGetRow );
+  NJS_CHECK_NUMBER_OF_ARGS ( getRowsBaton->error, info, 1, 1, exitGetRow );
 
   getRowsBaton->numRows = 1;
 
 exitGetRow:
   ResultSet::GetRowsCommon(getRowsBaton);
-  NanReturnUndefined();
+  info.GetReturnValue().SetUndefined();
 }
 
 /*****************************************************************************/
@@ -279,19 +283,22 @@ exitGetRow:
      Get Rows method on Result Set class.
 
    PARAMETERS:
-     args - numRows, callback
+     info - numRows, callback
 */
 NAN_METHOD(ResultSet::GetRows)
 {
-  NanScope();
 
   Local<Function> callback;
-  NJS_GET_CALLBACK ( callback, args );
+  NJS_GET_CALLBACK ( callback, info );
 
-  ResultSet *njsResultSet = ObjectWrap::Unwrap<ResultSet>(args.This());
-  rsBaton   *getRowsBaton = new rsBaton ();
-  getRowsBaton->njsRS   = njsResultSet;
-  NanAssignPersistent(getRowsBaton->cb, callback );
+  ResultSet *njsResultSet = Nan::ObjectWrap::Unwrap<ResultSet>(info.Holder());
+
+  /* If njsResultSet is invalid from JS, then throw an exception */
+  NJS_CHECK_OBJECT_VALID2 ( njsResultSet, info );
+
+  rsBaton   *getRowsBaton = new rsBaton ( njsResultSet->njsconn_->RSCount (),
+                                          callback );
+  getRowsBaton->njsRS = njsResultSet;
 
   if(njsResultSet->state_ == INVALID)
   {
@@ -309,9 +316,9 @@ NAN_METHOD(ResultSet::GetRows)
   }
   njsResultSet->state_  = ACTIVE;
 
-  NJS_CHECK_NUMBER_OF_ARGS ( getRowsBaton->error, args, 2, 2, exitGetRows );
+  NJS_CHECK_NUMBER_OF_ARGS ( getRowsBaton->error, info, 2, 2, exitGetRows );
   NJS_GET_ARG_V8UINT ( getRowsBaton->numRows, getRowsBaton->error,
-                       args, 0, exitGetRows );
+                       info, 0, exitGetRows );
   if(!getRowsBaton->numRows)
   {
     getRowsBaton->error = NJSMessages::getErrorMsg ( 
@@ -322,7 +329,7 @@ NAN_METHOD(ResultSet::GetRows)
   getRowsBaton->fetchMultiple = true;
 exitGetRows:
   ResultSet::GetRowsCommon(getRowsBaton);
-  NanReturnUndefined();
+  info.GetReturnValue().SetUndefined();
 }
 
 /*****************************************************************************/
@@ -346,7 +353,7 @@ void ResultSet::GetRowsCommon(rsBaton *getRowsBaton)
     goto exitGetRowsCommon;
   }
 
-  getRowsBaton->ebaton       = ebaton = new eBaton;
+  ebaton                     = getRowsBaton->ebaton;
   njsRS                      = getRowsBaton->njsRS;
   ebaton->columnNames        = new std::string[njsRS->numCols_];
   ebaton->maxRows            = getRowsBaton->numRows;
@@ -382,8 +389,17 @@ void ResultSet::GetRowsCommon(rsBaton *getRowsBaton)
 exitGetRowsCommon:
   getRowsBaton->req.data  = (void *)getRowsBaton;
 
-  uv_queue_work(uv_default_loop(), &getRowsBaton->req, Async_GetRows,
-                (uv_after_work_cb)Async_AfterGetRows);
+  int status = uv_queue_work(uv_default_loop(), &getRowsBaton->req,
+               Async_GetRows, (uv_after_work_cb)Async_AfterGetRows);
+  // delete the Baton if uv_queue_work fails
+  if ( status )
+  {
+    delete getRowsBaton;
+    string error = NJSMessages::getErrorMsg ( errInternalError,
+                                              "uv_queue_work",
+                                              "GetRowsCommon" );
+    NJS_SET_EXCEPTION(error.c_str(), error.length());
+  }
 
 }
 
@@ -477,36 +493,36 @@ void ResultSet::Async_GetRows(uv_work_t *req)
 */
 void ResultSet::Async_AfterGetRows(uv_work_t *req)
 {
-  NanScope();
+  Nan::HandleScope scope;
 
   rsBaton *getRowsBaton = (rsBaton*)req->data;
-  v8::TryCatch tc;
-  Handle<Value> argv[2];
+  Nan::TryCatch tc;
+  Local<Value> argv[2];
 
   if(!(getRowsBaton->error).empty())
   {
-    argv[0] = v8::Exception::Error(NanNew<v8::String>((getRowsBaton->error).c_str()));
-    argv[1] = NanUndefined();
+    argv[0] = v8::Exception::Error(Nan::New<v8::String>((getRowsBaton->error).c_str()).ToLocalChecked());
+    argv[1] = Nan::Undefined();
   }
   else
   {
-    argv[0]           = NanUndefined();
+    argv[0]           = Nan::Undefined();
 
     eBaton* ebaton               = getRowsBaton->ebaton;
     ebaton->outFormat            = getRowsBaton->njsRS->outFormat_;
-    Handle<Value> rowsArray      = NanNew<v8::Array>(0),
-                  rowsArrayValue = NanNew(NanNull());
+    Local<Value> rowsArray       = Nan::New<v8::Array>(0),
+                 rowsArrayValue  = Nan::Null();
 
     if(ebaton->rowsFetched)
     {
       rowsArray = Connection::GetRows(ebaton);
       if(!(ebaton->error).empty())
       {
-        argv[0] = v8::Exception::Error(NanNew<v8::String>((ebaton->error).c_str()));
-        argv[1] = NanUndefined();
+        argv[0] = v8::Exception::Error(Nan::New<v8::String>((ebaton->error).c_str()).ToLocalChecked());
+        argv[1] = Nan::Undefined();
         goto exitAsyncAfterGetRows;
       }
-      rowsArrayValue =  Handle<Array>::Cast(rowsArray)->Get(0);
+      rowsArrayValue =  Local<Array>::Cast(rowsArray)->Get(0);
     }
     argv[1] = (getRowsBaton->fetchMultiple) ? rowsArray : rowsArrayValue;
   }
@@ -517,14 +533,14 @@ void ResultSet::Async_AfterGetRows(uv_work_t *req)
     getRowsBaton->njsRS->state_ = INACTIVE;
   }
 
-  Local<Function> callback = NanNew(getRowsBaton->cb);
-  NanMakeCallback(NanGetCurrentContext()->Global(),
+  Local<Function> callback = Nan::New(getRowsBaton->ebaton->cb);
+  delete getRowsBaton;
+  Nan::MakeCallback(Nan::GetCurrentContext()->Global(),
                   callback, 2, argv);
   if(tc.HasCaught())
   {
-    node::FatalException(tc);
+    Nan::FatalException(tc);
   }
-  delete getRowsBaton;
 }
 
 /*****************************************************************************/
@@ -533,19 +549,22 @@ void ResultSet::Async_AfterGetRows(uv_work_t *req)
      Close method
 
    PARAMETERS:
-     args - Callback
+     info - Callback
 */
 NAN_METHOD(ResultSet::Close)
 {
-  NanScope();
 
   Local<Function> callback;
-  NJS_GET_CALLBACK ( callback, args );
+  NJS_GET_CALLBACK ( callback, info );
 
-  ResultSet *njsResultSet = ObjectWrap::Unwrap<ResultSet>(args.This());
-  rsBaton *closeBaton     = new rsBaton ();
-  closeBaton->njsRS       = njsResultSet;
-  NanAssignPersistent( closeBaton->cb, callback );
+  ResultSet *njsResultSet = Nan::ObjectWrap::Unwrap<ResultSet>(info.Holder());
+
+  /* If njsResultSet is invalid from JS, then throw an exception */
+  NJS_CHECK_OBJECT_VALID2 ( njsResultSet, info );
+
+  rsBaton   *closeBaton = new rsBaton ( njsResultSet->njsconn_->RSCount (),
+                                        callback );
+  closeBaton->njsRS = njsResultSet;
 
   if(njsResultSet->state_ == INVALID)
   {
@@ -563,7 +582,7 @@ NAN_METHOD(ResultSet::Close)
   }
   njsResultSet->state_ = ACTIVE;
 
-  NJS_CHECK_NUMBER_OF_ARGS ( closeBaton->error, args, 1, 1, exitClose );
+  NJS_CHECK_NUMBER_OF_ARGS ( closeBaton->error, info, 1, 1, exitClose );
 
   if(!njsResultSet->njsconn_->isValid())
   {
@@ -575,10 +594,19 @@ NAN_METHOD(ResultSet::Close)
 exitClose:
   closeBaton->req.data = (void *)closeBaton;
 
-  uv_queue_work(uv_default_loop(), &closeBaton->req, Async_Close,
-                (uv_after_work_cb)Async_AfterClose);
+  int status = uv_queue_work(uv_default_loop(), &closeBaton->req,
+               Async_Close, (uv_after_work_cb)Async_AfterClose);
+  // delete the Baton if uv_queue_work fails
+  if ( status )
+  {
+    delete closeBaton;
+    string error = NJSMessages::getErrorMsg ( errInternalError,
+                                              "uv_queue_work",
+                                              "ResultSetClose" );
+    NJS_SET_EXCEPTION(error.c_str(), error.length());
+  }
 
-  NanReturnUndefined();
+  info.GetReturnValue().SetUndefined();
 }
 
 /*****************************************************************************/
@@ -640,16 +668,16 @@ void ResultSet::Async_Close(uv_work_t *req)
 */
 void ResultSet::Async_AfterClose(uv_work_t *req)
 {
-  NanScope();
+  Nan::HandleScope scope;
   rsBaton *closeBaton = (rsBaton*)req->data;
 
-  v8::TryCatch tc;
+  Nan::TryCatch tc;
 
-  Handle<Value> argv[1];
+  Local<Value> argv[1];
 
   if(!(closeBaton->error).empty())
   {
-    argv[0] = v8::Exception::Error(NanNew<v8::String>((closeBaton->error).c_str()));
+    argv[0] = v8::Exception::Error(Nan::New<v8::String>((closeBaton->error).c_str()).ToLocalChecked());
     if(!closeBaton->errOnActiveOrInvalid)
     {
       closeBaton->njsRS->state_ = INACTIVE;
@@ -657,16 +685,16 @@ void ResultSet::Async_AfterClose(uv_work_t *req)
   }
   else
   {
-    argv[0] = NanUndefined();
+    argv[0] = Nan::Undefined();
     // resultset is not valid after close succeeds.
     closeBaton-> njsRS-> state_ = INVALID;
   }
-  Local<Function> callback = NanNew(closeBaton->cb);
+  Local<Function> callback = Nan::New(closeBaton->ebaton->cb);
   delete closeBaton;
-  NanMakeCallback( NanGetCurrentContext()->Global(), callback, 1, argv );
+  Nan::MakeCallback( Nan::GetCurrentContext()->Global(), callback, 1, argv );
   if(tc.HasCaught())
   {
-    node::FatalException(tc);
+    Nan::FatalException(tc);
   }
 }
 

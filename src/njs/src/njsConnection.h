@@ -1,4 +1,5 @@
-/* Copyright (c) 2015, Oracle and/or its affiliates. All rights reserved. */
+/* Copyright (c) 2015, 2016, Oracle and/or its affiliates.
+   All rights reserved. */
 
 /******************************************************************************
  *
@@ -58,13 +59,13 @@
 #include "njsUtils.h"
 #include "njsOracle.h"
 
-
 using namespace v8;
 using namespace node;
 using namespace dpi;
 
 class Connection;
 class ProtoILob;
+
 
 /**
 * Structure used for binds
@@ -81,12 +82,16 @@ typedef struct Bind
   short               *ind;
   bool                isOut;
   bool                isInOut;          // Date/Timestamp needs this info
+  bool                isArray;
+  unsigned int        maxArraySize;
+  unsigned int        curArraySize;
   unsigned int        rowsReturned;     /* number rows returned for
                                            the bind (DML RETURNING) */
   dpi::DateTimeArray* dttmarr;
 
   Bind () : key(""), value(NULL), extvalue (NULL), len(NULL), len2(NULL),
             maxSize(0), type(0), ind(NULL), isOut(false), isInOut(false),
+            isArray(false), maxArraySize(0), curArraySize(0),
             rowsReturned(0), dttmarr ( NULL )
   {}
 }Bind;
@@ -158,20 +163,25 @@ typedef struct eBaton
   DataType             *fetchAsStringTypes;  // Global by type settings
   unsigned int         fetchInfoCount;   // Conversion requested count
   FetchInfo            *fetchInfo;       // Conversion meta data
-  Persistent<Function> cb;
+  Nan::Persistent<Function> cb;
+  RefCounter                counter;
 
-  eBaton() : sql(""), error(""), dpienv(NULL), dpiconn(NULL), njsconn(NULL),
+  eBaton( unsigned int& count, Local<Function> callback ) :
+             sql(""), error(""), dpienv(NULL), dpiconn(NULL), njsconn(NULL),
              rowsAffected(0), maxRows(0), prefetchRows(0),
              getRS(false), autoCommit(false), rowsFetched(0), 
              outFormat(0), numCols(0), dpistmt(NULL),
              st(DpiStmtUnknown), stmtIsReturning (false), numOutBinds(0),
              columnNames(NULL), defines(NULL), fetchAsStringTypesCount (0),
-             fetchAsStringTypes(NULL), fetchInfoCount(0), fetchInfo(NULL)
-  {}
+             fetchAsStringTypes(NULL), fetchInfoCount(0), fetchInfo(NULL),
+             counter ( count )
+  { 
+    cb.Reset( callback );
+  }
 
   ~eBaton ()
    {
-     NanDisposePersistent(cb);
+     cb.Reset ();
      if( !binds.empty() )
      {
        for( unsigned int index = 0 ;index < binds.size(); index++ )
@@ -242,15 +252,15 @@ typedef struct eBaton
    }
 }eBaton;
 
-class Connection: public ObjectWrap
+class Connection: public Nan::ObjectWrap
 {
 public:
   void setConnection (dpi::Conn*, Oracledb* oracledb);
   // Define Connection Constructor
-  static Persistent<FunctionTemplate> connectionTemplate_s;
+  static Nan::Persistent<FunctionTemplate> connectionTemplate_s;
   static void Init (Handle<Object> target);
-  static Handle<Value> GetRows (eBaton* executeBaton);
-  static Handle<Value> GetMetaData (std::string* columnNames,
+  static Local<Value> GetRows (eBaton* executeBaton);
+  static Local<Value> GetMetaData (std::string* columnNames,
                                     unsigned int numCols);
   static void DoDefines ( eBaton* executeBaton, const dpi::MetaData*,
                           unsigned int numCols );
@@ -258,6 +268,16 @@ public:
   static void CopyMetaData ( std::string*, const dpi::MetaData*, unsigned int ); 
   bool isValid() { return isValid_; }
   dpi::Conn* getDpiConn() { return dpiconn_; }
+
+  /*
+   * Counters to see whether connection is busy or not with LOB, ResultSet or
+   * DB operations. This counters incremented and decremented for each
+   * operation and used to prevent releasing busy connection.
+   */
+  inline unsigned int& LOBCount ()   { return lobCount_; }
+  inline unsigned int& RSCount  ()   { return rsCount_;  }
+  inline unsigned int& DBCount  ()   { return dbCount_;  }
+
   Oracledb* oracledb_;
 
 private:
@@ -288,16 +308,18 @@ private:
   static void Async_AfterBreak (uv_work_t *req);
 
   // Define Getter Accessors to properties
-  static NAN_PROPERTY_GETTER(GetStmtCacheSize);
-  static NAN_PROPERTY_GETTER(GetClientId);
-  static NAN_PROPERTY_GETTER(GetModule);
-  static NAN_PROPERTY_GETTER(GetAction);
+  static NAN_GETTER(GetStmtCacheSize);
+  static NAN_GETTER(GetClientId);
+  static NAN_GETTER(GetModule);
+  static NAN_GETTER(GetAction);
+  static NAN_GETTER(GetOracleServerVersion);
 
   // Define Setter Accessors to properties
   static NAN_SETTER(SetStmtCacheSize);
   static NAN_SETTER(SetClientId);
   static NAN_SETTER(SetModule);
   static NAN_SETTER(SetAction);
+  static NAN_SETTER(SetOracleServerVersion);
 
   static void connectionPropertyException(Connection* njsConn, 
                                           NJSErrorType errType,
@@ -321,50 +343,53 @@ private:
                                          std::string &name,
                                         unsigned short defaultType);
 
-  static void ProcessBinds (_NAN_METHOD_ARGS, unsigned int index,
+  static void ProcessBinds (Nan::NAN_METHOD_ARGS_TYPE args, unsigned int index,
                             eBaton* executeBaton);
-  static void ProcessOptions (_NAN_METHOD_ARGS, unsigned int index,
+  static void ProcessOptions (Nan::NAN_METHOD_ARGS_TYPE args, unsigned int index,
                               eBaton* executeBaton);
-  static void ProcessCallback (_NAN_METHOD_ARGS, unsigned int index,
+  static void ProcessCallback (Nan::NAN_METHOD_ARGS_TYPE args, unsigned int index,
                                eBaton* executeBaton);
-  static void GetExecuteBaton (_NAN_METHOD_ARGS, eBaton* executeBaton);
+  static void GetExecuteBaton (Nan::NAN_METHOD_ARGS_TYPE args, eBaton* executeBaton);
   static void GetOptions (Handle<Object> options, eBaton* executeBaton);
   static void GetBinds (Handle<Object> bindobj, eBaton* executeBaton);
   static void GetBinds (Handle<Array> bindarray, eBaton* executeBaton);
-  static void GetBindUnit (Handle<Value> bindtypes, Bind* bind,
+  static void GetBindUnit (Local<Value> bindtypes, Bind* bind,
                            eBaton* executeBaton);
-  static void GetInBindParams (Handle<Value> bindtypes, Bind* bind,
-                                     eBaton* executeBaton, BindType bindType);
+  static void GetInBindParams(Local<Value> v8val, Bind *bind, eBaton *executeBaton, BindType bindType);
+  static void GetInBindParamsScalar(Local<Value> v8val, Bind *bind, eBaton *executeBaton, BindType bindType);
+  static void GetInBindParamsArray(Local<Array> v8vals, Bind *bind, eBaton *executeBaton, BindType bindType);
+  static bool AllocateBindArray(unsigned short dataType, Bind* bind, eBaton *executeBaton, size_t *arrayElementSize);
+
   static void GetOutBindParams (unsigned short dataType, Bind* bind,
                                 eBaton* executeBaton);
   static void Descr2Double ( Define* defines, unsigned int numCols,
                              unsigned int rowsFetched, bool getRS );
   static void Descr2protoILob ( eBaton *executeBaton, unsigned int numCols,
                                 unsigned int rowsFetched );
-  static v8::Handle<v8::Value> GetOutBinds (eBaton* executeBaton);
-  static v8::Handle<v8::Value> GetOutBindArray (eBaton* executeBaton);
-  static v8::Handle<v8::Value> GetOutBindObject (eBaton* executeBaton);
-  static v8::Handle<v8::Value> GetArrayValue (eBaton *executeBaton,
+  static v8::Local<v8::Value> GetOutBinds (eBaton* executeBaton);
+  static v8::Local<v8::Value> GetOutBindArray (eBaton* executeBaton);
+  static v8::Local<v8::Value> GetOutBindObject (eBaton* executeBaton);
+  static v8::Local<v8::Value> GetArrayValue (eBaton *executeBaton,
                                               Bind *bind, unsigned long count);
   // to convert DB value to v8::Value
-  static v8::Handle<v8::Value> GetValue (eBaton *executeBaton,
+  static v8::Local<v8::Value> GetValue (eBaton *executeBaton,
                                          bool isQuery,
                                          unsigned int index,
                                          unsigned int row = 0);
   // for primitive types (Number, String and Date) 
-  static v8::Handle<v8::Value> GetValueCommon (eBaton *executeBaton, 
+  static v8::Local<v8::Value> GetValueCommon (eBaton *executeBaton, 
                                          short ind, 
                                          unsigned short type, 
                                          void* val, DPI_BUFLEN_TYPE len);
   // for refcursor
-  static v8::Handle<v8::Value> GetValueRefCursor (eBaton *executeBaton, 
+  static v8::Local<v8::Value> GetValueRefCursor (eBaton *executeBaton, 
                                                   Bind *bind);
   // for lobs
-  static v8::Handle<v8::Value> GetValueLob (eBaton *executeBaton, 
+  static v8::Local<v8::Value> GetValueLob (eBaton *executeBaton, 
                                             Bind *bind);
-  //static void UpdateDateValue ( eBaton *executeBaton );
   static void UpdateDateValue ( eBaton *executeBaton, unsigned int index );
-  static void v8Date2OraDate ( v8::Handle<v8::Value>, Bind *bind);
+  static void v8Date2OraDate(v8::Local<v8::Value> val, Bind *bind);
+  static ConnectionBusyStatus getConnectionBusyStatus ( Connection *conn );
 
   // Callback/Utility function used to allocate buffer(s) for Bind Structs
   static void cbDynBufferAllocate ( void *ctx, bool dmlReturning,
@@ -387,15 +412,57 @@ private:
                                dvoid **bufpp, void **alenpp, void **indpp,
                                unsigned short **rcode, unsigned char *piecep );
 
-  // GetLob Method on Connection class
-  static v8::Handle<v8::Value> NewLob(eBaton* executeBaton,
+  // NewLob Method on Connection class
+  static v8::Local<v8::Value> NewLob(eBaton* executeBaton,
                                       ProtoILob *protoILob);
 
-  static NAN_METHOD(GetLob);
+  static inline ValueType GetValueType ( v8::Local<v8::Value> v )
+  {
+    ValueType type = VALUETYPE_INVALID;
+    
+    if ( v->IsUndefined () || v->IsNull () )
+    {
+      type = VALUETYPE_NULL;
+    }
+    else if ( v->IsString () )
+    {
+      type = VALUETYPE_STRING;
+    }
+    else if ( v->IsInt32 () )
+    {
+      type = VALUETYPE_INTEGER;
+    }
+    else if ( v->IsUint32 () )
+    {
+      type = VALUETYPE_UINTEGER;
+    }
+    else if ( v->IsNumber () )
+    {
+      type = VALUETYPE_NUMBER;
+    }
+    else if ( v->IsDate () )
+    {
+      type = VALUETYPE_DATE;
+    }
+    else if ( v->IsObject () )
+    {
+      type = VALUETYPE_OBJECT;
+    }
+
+    return type;
+  }
   
 
-  dpi::Conn* dpiconn_;
-  bool isValid_;
+  dpi::Conn*     dpiconn_;
+  bool           isValid_;
+  unsigned int   oracleServerVersion_;
+  /*
+   * Counters to see whether connection is busy or not with LOB, ResultSet or
+   * DB operations. This counters used to prevent releasing busy connection.
+   */
+  unsigned int   lobCount_;    // LOB operations counter
+  unsigned int   rsCount_;     // ResultSet operations counter
+  unsigned int   dbCount_;     // Connection or DB operations counter
 
 };
 

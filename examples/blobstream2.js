@@ -1,4 +1,4 @@
-/* Copyright (c) 2015, Oracle and/or its affiliates. All rights reserved. */
+/* Copyright (c) 2015, 2016, Oracle and/or its affiliates. All rights reserved. */
 
 /******************************************************************************
  *
@@ -87,9 +87,12 @@ oracledb.getConnection(
                  });
                });
         lob.on('close',
-               function(chunk)
+               function()
                {
                  console.log("lob.on 'close' event");
+                 connection.release(function(err) {
+                   if (err) console.error(err);
+                 });
                });
         lob.on('error',
                function(err)

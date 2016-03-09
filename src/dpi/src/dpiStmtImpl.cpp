@@ -1,4 +1,5 @@
-/* Copyright (c) 2015, Oracle and/or its affiliates. All rights reserved. */
+/* Copyright (c) 2015, 2016, Oracle and/or its affiliates.
+   All rights reserved. */
 
 /******************************************************************************
  *
@@ -28,10 +29,6 @@
  *   its own OCIError object and this will be destroyed at the end of execution
  *
  *****************************************************************************/
-
-#ifndef ORATYPES
-# include <oratypes.h>
-#endif
 
 #ifndef DPISTMTIMPL_ORACLE
 # include <dpiStmtImpl.h>
@@ -91,9 +88,12 @@ StmtImpl::StmtImpl (EnvImpl *env, OCIEnv *envh, ConnImpl *conn,
         isReturning_(false), isReturningSet_(false), refCursor_(false),
         state_(DPI_STMT_STATE_UNDEFINED)
 {
+  void *errh  = NULL;
+  void *stmth = NULL;
   // create an OCIError object for this execution
-  ociCallEnv (OCIHandleAlloc ((void *)envh, (dvoid **)&errh_,
+  ociCallEnv (OCIHandleAlloc ((void *)envh, &errh,
                                OCI_HTYPE_ERROR, 0, (dvoid **)0), envh);
+  errh_ = ( OCIError * ) errh;
 
   if(!sql.empty())
   {
@@ -106,8 +106,9 @@ StmtImpl::StmtImpl (EnvImpl *env, OCIEnv *envh, ConnImpl *conn,
   else
   {
     //  to build empty stmt object used for ref cursors.
-    ociCall (OCIHandleAlloc ((void *)envh, (dvoid **)&stmth_,
+    ociCall (OCIHandleAlloc ((void *)envh, (dvoid **)&stmth,
                              OCI_HTYPE_STMT,0, (dvoid **)0), errh_);
+    stmth_ = ( OCIStmt * ) stmth;
     refCursor_ = true;
   }
 }
@@ -246,6 +247,7 @@ void StmtImpl::prefetchRows (unsigned int prefetchRows)
 */
 void StmtImpl::bind (unsigned int pos, unsigned short type, void *buf,
                      DPI_SZ_TYPE bufSize, short *ind, DPI_BUFLEN_TYPE *bufLen,
+                     unsigned int maxarr_len, unsigned int *curelen,
                      void *data, cbtype cb)
 {
   OCIBind *b = (OCIBind *)0;
@@ -256,7 +258,7 @@ void StmtImpl::bind (unsigned int pos, unsigned short type, void *buf,
                          (type == DpiRSet) ? 0 : bufSize, type,
                          (cb ? NULL : ind),
                          (cb ? NULL : bufLen),
-                         NULL, 0, NULL,
+                         NULL, maxarr_len, curelen,
                          (cb) ? OCI_DATA_AT_EXEC : OCI_DEFAULT),
            errh_);
 
@@ -285,17 +287,24 @@ void StmtImpl::bind (unsigned int pos, unsigned short type, void *buf,
     PARAMETERS
       name         - name of the variable
       nameLen      - len of name.
+      bndpos       - position in array in case of DML Returning.
       type         - data type
       buf (IN/OUT) - data buffer for value
       bufSize      - size of buffer
       ind          - indicator
       bufLen       - returned buffer size
+      maxarr_len   - max array len in case of PL/SQL array binds
+      curelen      - current array len in case of PL/SQL array binds.
+      data         - if callback specified, data for callback
+      cb           - callback used in case of DML Returning.
 */
 void StmtImpl::bind (const unsigned char *name, int nameLen,
                      unsigned int bndpos,
                      unsigned short type, void *buf, DPI_SZ_TYPE bufSize,
                      short *ind, DPI_BUFLEN_TYPE *bufLen,
-                     void *data, cbtype cb)
+                     unsigned int maxarr_len, unsigned int *curelen,
+                     void *data,
+                     cbtype cb)
 {
   OCIBind *b = (OCIBind *)0;
 
@@ -305,7 +314,8 @@ void StmtImpl::bind (const unsigned char *name, int nameLen,
                           (type == DpiRSet) ? 0 : bufSize, type, 
                           (cb ? NULL : ind),
                           (cb ? NULL : bufLen),
-                          NULL, 0, NULL,
+                          NULL,
+                          maxarr_len, curelen,
                           (cb) ? OCI_DATA_AT_EXEC : OCI_DEFAULT), errh_);
   if ( cb )
   {
@@ -345,7 +355,8 @@ void StmtImpl::execute (int numIterations,  bool autoCommit)
            errh_ );
 
 #if OCI_MAJOR_VERSION < 12
-  if ( isDML () && !conn_->hasTxn () )
+  // Rollback on connection release for all non-select transactions.
+  if ( ( stmtType_ != DpiStmtSelect ) && !conn_->hasTxn () )
   {
     /* Not to be reset, till thread safety is ensured in NJS */
     conn_->hasTxn (true );
@@ -473,38 +484,39 @@ const MetaData* StmtImpl::getMetaData ()
     return NULL;
 
   ub4       col = 0;
-  OCIParam *colDesc = (OCIParam *) 0;
+  void *colDesc = (OCIParam *) 0;
 
   meta_ = new MetaData[numCols_];
+  void *colName = NULL;
 
   while (col < numCols_)
   {
     ociCall(OCIParamGet((void *)stmth_, OCI_HTYPE_STMT, errh_,
-                        (void **)&colDesc, (ub4) (col+1)), errh_ );
-    ociCall(OCIAttrGet((void*) colDesc, (ub4) OCI_DTYPE_PARAM,
-                       (void**) &(meta_[col].colName),
+                        &colDesc, (ub4) (col+1)), errh_ );
+    ociCall(OCIAttrGet(colDesc, (ub4) OCI_DTYPE_PARAM, &colName,
                        (ub4 *) &(meta_[col].colNameLen),
                        (ub4) OCI_ATTR_NAME,errh_ ), errh_ );
-    ociCall(OCIAttrGet((void*) colDesc, (ub4) OCI_DTYPE_PARAM,
+    meta_[col].colName = (unsigned char *) colName;
+    ociCall(OCIAttrGet(colDesc, (ub4) OCI_DTYPE_PARAM,
                        (void*) &(meta_[col].dbType),(ub4 *) 0,
                        (ub4) OCI_ATTR_DATA_TYPE,
                        errh_ ), errh_ );
-    ociCall(OCIAttrGet((void*) colDesc, (ub4) OCI_DTYPE_PARAM,
+    ociCall(OCIAttrGet(colDesc, (ub4) OCI_DTYPE_PARAM,
                        (void*) &(meta_[col].dbSize),(ub4 *) 0,
                        (ub4) OCI_ATTR_DATA_SIZE,
                        errh_ ), errh_ );
-    ociCall(OCIAttrGet((void*) colDesc, (ub4) OCI_DTYPE_PARAM,
+    ociCall(OCIAttrGet(colDesc, (ub4) OCI_DTYPE_PARAM,
                        (void*) &(meta_[col].isNullable),(ub4*) 0,
                        (ub4) OCI_ATTR_IS_NULL,
                        errh_ ), errh_ );
     if (meta_[col].dbType == DpiNumber || meta_[col].dbType == DpiBinaryFloat
            ||meta_[col].dbType == DpiBinaryDouble )
     {
-      ociCall(OCIAttrGet((void*) colDesc, (ub4) OCI_DTYPE_PARAM,
+      ociCall(OCIAttrGet(colDesc, (ub4) OCI_DTYPE_PARAM,
                          (void*) &(meta_[col].precision),(ub4* ) 0,
                          (ub4) OCI_ATTR_PRECISION,
                          errh_ ), errh_ );
-      ociCall(OCIAttrGet((void*) colDesc, (ub4) OCI_DTYPE_PARAM,
+      ociCall(OCIAttrGet(colDesc, (ub4) OCI_DTYPE_PARAM,
                          (void*) &(meta_[col].scale),(ub4*) 0,
                          (ub4) OCI_ATTR_SCALE,
                          errh_ ), errh_ );

@@ -24,11 +24,6 @@
  *
  *****************************************************************************/
 
-#ifndef ORATYPES
-# include <oratypes.h>
-#endif
-
-
 #ifndef DPIENVIMPL_ORACLE
 # include <dpiEnvImpl.h>
 #endif
@@ -680,12 +675,12 @@ void EnvImpl::releaseDateTimeArray ( DateTimeArray *arr )  const
 
 DpiHandle * EnvImpl::allocHandle(HandleType handleType)
 {
-  DpiHandle *handle = NULL;
+  void *handle = NULL;
 
-  ociCallEnv(OCIHandleAlloc(envh_, (void **)&handle, handleType, 0, NULL),
+  ociCallEnv(OCIHandleAlloc(envh_, &handle, handleType, 0, NULL),
              envh_);
 
-  return handle;
+  return (DpiHandle *)handle;
 }
 
 
@@ -707,12 +702,12 @@ DpiHandle * EnvImpl::allocHandle(HandleType handleType)
 
 Descriptor * EnvImpl::allocDescriptor(DescriptorType descriptorType)
 {
-  Descriptor *descriptor = NULL;
+  void *descriptor = NULL;
 
-  ociCallEnv(OCIDescriptorAlloc(envh_, (void **)&descriptor, descriptorType,
+  ociCallEnv(OCIDescriptorAlloc(envh_, &descriptor, descriptorType,
                                 0, NULL), envh_);
 
-  return descriptor;
+  return (Descriptor *)descriptor;
 }
 
 

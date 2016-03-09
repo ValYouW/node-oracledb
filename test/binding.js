@@ -37,7 +37,7 @@
 var oracledb = require('oracledb');
 var should = require('should');
 var async = require('async');
-var dbConfig = require('./dbConfig.js');
+var dbConfig = require('./dbconfig.js');
 var assist = require('./dataTypeAssist.js');
 
 describe('4. binding.js', function() {
@@ -675,12 +675,13 @@ describe('4. binding.js', function() {
       );
     })
 
-    it.skip('4.4.3 Negative - bind out data exceeds default length', function(done) {
+    it('4.4.3 Negative - bind out data exceeds default length', function(done) {
       connection.execute(
         "BEGIN :o := lpad('A',201,'x'); END;", 
          { o: { type: oracledb.STRING, dir : oracledb.BIND_OUT } }, 
          function (err, result) { 
            should.exist(err);
+           // ORA-06502: PL/SQL: numeric or value error
            err.message.should.startWith('ORA-06502:');
            // console.log(result.outBinds.o.length); 
            done();
@@ -694,14 +695,13 @@ describe('4. binding.js', function() {
         { o: { type: oracledb.STRING, dir : oracledb.BIND_OUT, maxSize:50000 } },
         function(err, result) {
           should.exist(err);
-          console.log(result.outBinds.o.length);
           done();
         }
       );
     })
   }) // 4.4 
 
-  describe.skip('4.5 The default direction for binding is BIND_IN', function() {
+  describe('4.5 The default direction for binding is BIND_IN', function() {
     var connection = null;
     var tableName = "oracledb_raw";
 
@@ -734,7 +734,7 @@ describe('4. binding.js', function() {
     })
 
     
-    it('4.5.1',function(done) {
+    it('4.5.1 ',function(done) {
       connection.execute(
         "insert into oracledb_raw (num) values (:id)",
         { id: { val: 1, type: oracledb.NUMBER } },  // fails with error  NJS-013: invalid bind direction
@@ -746,4 +746,43 @@ describe('4. binding.js', function() {
       );
     })
   }) // 4.5
+
+  describe('4.6 PL/SQL block with empty outBinds', function() {
+
+    it('4.6.1 ', function(done) {
+      
+      var sql = "begin execute immediate 'drop table does_not_exist'; " 
+        + "exception when others then " 
+        + "if sqlcode <> -942 then " 
+        + "raise; " 
+        + "end if; end;"; 
+      var binds = []; 
+      var options = {}; 
+
+      oracledb.getConnection(
+        credential,
+        function(err, connection)
+        {
+          should.not.exist(err);
+          connection.execute(
+            sql, 
+            binds, 
+            options,
+            function(err, result) 
+            {
+              should.not.exist(err);
+              result.should.eql(
+                { rowsAffected: undefined,
+                  outBinds: undefined,
+                  rows: undefined,
+                  metaData: undefined }
+              );
+              done();
+            }
+          );
+        }
+      );
+
+    })
+  })
 })

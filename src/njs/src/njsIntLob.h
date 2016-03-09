@@ -81,16 +81,20 @@ typedef struct LobBaton
   ILob              *iLob;
   char              *writebuf;
   unsigned long long writelen;
+  RefCounter         counter;
   
-  Persistent<Function> cb;
+  Nan::Persistent<Function> cb;
 
-  LobBaton(): error(""), dpienv(NULL), dpiconn(NULL),
-              iLob(NULL), writebuf(NULL), writelen(0)
-  {}
+  LobBaton( unsigned int& count, Local<Function> callback ):
+    error(""), dpienv(NULL), dpiconn(NULL), iLob(NULL), writebuf(NULL),
+    writelen(0), counter( count )
+  { 
+    cb.Reset( callback );
+  }
 
   ~LobBaton ()
-   {
-     NanDisposePersistent(cb);
+   { 
+     cb.Reset();
    }
   
 } LobBaton;
@@ -137,15 +141,13 @@ private:
   unsigned long long length_;
 };
 
-
-
-class ILob : public ObjectWrap
+class ILob : public Nan::ObjectWrap
 {
  public:
   void setILob(eBaton *executeBaton,  ProtoILob *protoILob);
   
                                 // Define ILob Constructor
-  static Persistent<FunctionTemplate> iLobTemplate_s;
+  static Nan::Persistent<FunctionTemplate> iLobTemplate_s;
   
   static void Init(Handle<Object> target);
 
@@ -166,11 +168,11 @@ class ILob : public ObjectWrap
 
   
                                 // Getters for properties
-  static NAN_PROPERTY_GETTER(GetChunkSize);
-  static NAN_PROPERTY_GETTER(GetLength);
-  static NAN_PROPERTY_GETTER(GetPieceSize);
-  static NAN_PROPERTY_GETTER(GetOffset);
-  static NAN_PROPERTY_GETTER(GetType);
+  static NAN_GETTER(GetChunkSize);
+  static NAN_GETTER(GetLength);
+  static NAN_GETTER(GetPieceSize);
+  static NAN_GETTER(GetOffset);
+  static NAN_GETTER(GetType);
 
   
                                 // Setters for properties
@@ -191,12 +193,6 @@ class ILob : public ObjectWrap
   static void Async_Write (uv_work_t *req);
   static void Async_AfterWrite (uv_work_t *req);
 
-                                // GetLob Method on ILob class
-  static NAN_METHOD(GetLob);
-  static void Async_GetLob (uv_work_t *req);
-  static void Async_AfterGetLob (uv_work_t *req);
-
-
   Descriptor    *lobLocator_;
   unsigned short fetchType_;
   
@@ -216,7 +212,5 @@ class ILob : public ObjectWrap
   unsigned long long amountWritten_;
   unsigned int       type_;
 };
-
-
 
 #endif                       /** __NJSILOB_H__ **/

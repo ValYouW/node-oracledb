@@ -37,7 +37,7 @@ var oracledb = require('oracledb');
 var should = require('should');
 var async = require('async');
 var assist = require('./dataTypeAssist.js');
-var dbConfig = require('./dbConfig.js');
+var dbConfig = require('./dbconfig.js');
 
 describe('33. dataTypeTimestamp1.js', function() {
   
@@ -141,6 +141,24 @@ describe('33. dataTypeTimestamp1.js', function() {
           should.not.exist(err);
           done();
       });
+    })
+
+    it('33.3.3 returns scalar types from PL/SQL block', function(done) {
+      var sql = "BEGIN SELECT systimestamp into :bv from dual; END;"; 
+      var binds = { bv: { dir: oracledb.BIND_OUT, type: oracledb.STRING } };
+      var options = { outFormat: oracledb.OBJECT };
+
+      connection.execute(
+        sql,
+        binds,
+        options,
+        function(err, result) {
+          should.not.exist(err);
+          (result.outBinds.bv).should.be.a.String;
+          done();
+        }
+      );
+      
     })
 
   }) // end of 33.3 suite
